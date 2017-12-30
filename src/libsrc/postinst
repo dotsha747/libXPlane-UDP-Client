@@ -1,0 +1,4 @@
+#! /bin/sh
+
+# .deb post-installation script
+echo "postinst"

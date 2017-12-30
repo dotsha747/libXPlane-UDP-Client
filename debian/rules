@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+%:
+	dh $@
+
+installbasic:
+	dh_testdir
+	dh_testroot
+	dh_clean --keep
+
+install: installbasic
+	$(MAKE) install DESTDIR=${DESTDIR}
