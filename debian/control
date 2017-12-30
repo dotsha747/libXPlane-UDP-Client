@@ -1,5 +1,4 @@
 Source: ${PACKAGE}${MAJORVERSION}
-Version: ${MAJORVERSION}${MINORVERSION}
 Maintainer: shahada abubakar <shahada@abubakar.net>
 Section: misc
 Priority: optional
