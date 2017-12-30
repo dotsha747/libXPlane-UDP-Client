@@ -1,18 +1,36 @@
 #!/bin/sh
 
 # script to patch Debian folder. Called by gitpkgtool during
-# build, is passed to arguments, $project $version $sover.
+# build, it is passed the arguments: $project $majorVersion $minorVersion
 
 PROJECT=$1
-VERSION=$2
-SOVER=$3
+MAJORVERSION=$2
+MINORVERSION=$3
 
-echo " - Patching Debian with PROJECT=${PROJECT} VERSION=${VERSION} SOVER=${SOVER}"
+echo " - Patching Debian with PROJECT=${PROJECT} MAJORVERISON=${MAJORVERSION} MINORVERSION=${MINORVERSION}"
 
-sed -i -e "s/\${project}/${PROJECT}/" debian/control
-sed -i -e "s/\${sover}/${SOVER}/" debian/control
-sed -i -e "s/\${version}/${VERSION}/" debian/control
+PACKAGE=`echo ${PROJECT} | tr A-Z a-z`
+LIBNAME=`echo ${PROJECT} | sed -e 's/-//g'`
+ARCH=`arch | sed -e 's/x86_64/amd64/'`
 
-ln -sf libxplane-udp-client.install debian/libxplane-udp-client${SOVER}.install
-ln -sf libxplane-udp-client-dev.install debian/libxplane-udp-client${SOVER}-dev.install
+echo " - PACKAGE ${PACKAGE} LIBNAME ${LIBNAME}"
+
+sed -i -e "s/\${PACKAGE}/${PACKAGE}/" debian/control
+sed -i -e "s/\${MAJORVERSION}/${MAJORVERSION}/" debian/control
+
+# The .install need to be symlinked as the packagename has $MAJORVERSION
+# suffixed, so this is what dpkg-deb looks for.
+
+ln -sf ${PACKAGE}.install debian/${PACKAGE}${MAJORVERSION}.install
+ln -sf ${PACKAGE}-dev.install debian/${PACKAGE}${MAJORVERSION}-dev.install
+
+
+# substitute variables into the contents of the .install files
+for dotinstall in debian/control debian/*install ; do
+	sed -i 	-e "s/\${PACKAGE}/${PACKAGE}/" \
+					-e "s/\${LIBNAME}/${LIBNAME}/" \
+					-e "s/\${MAJORVERSION}/${MAJORVERSION}/" \
+					-e "s/\${MINORVERSION}/${MINORVERSION}/" \
+					-e "s/\${ARCH}/${ARCH}/" $dotinstall
+done
 

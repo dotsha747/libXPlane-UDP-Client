@@ -1,11 +1,26 @@
 
-# This is the name of the package
-NAME=libxplane-udp-client
-MAJORVER=1
-MINORVER=0
+# This is the name of the project. We get it from the basename of 
+# the project folder. It may contain mixed-case, and "-" as word
+# separators. CamelCase is discouraged.
+#
+# The MAJORVER and MINORVER here are place holders; during a 
+# gitpkgtool build they are substituted in-place
+# by patchVersion.sh.
 
-# the name with "-" removed, used to name the library.
-LIBNAME=$(shell echo $(NAME)|sed -e 's/-//g')$(MAJORVER)
+CWD=$(shell pwd)
+PROJECT=$(shell basename $(CWD))
+MAJORVER=1
+MINORVER=0.1.gb35f430
+
+# The debian package name. It may contain "-" as a word seperator
+# but must be all lower case.
+
+PACKAGE=$(shell echo $(PROJECT) | tr A-Z a-z)
+
+
+# the library name. it may contain mixed case but the "-" should be
+# removed. 
+LIBNAME=$(shell echo $(PROJECT)|sed -e 's/-//g')
 
 # the libname without the "lib" prefix, used when linking
 LNAME=$(shell echo $(LIBNAME)|sed -e 's/^lib//')
@@ -77,7 +92,7 @@ install: $(LIBFILE) $(EXE) doc
 	install -D $(EXE) --target-directory=$(PREFIX)/bin
 	install -D src/libsrc/XPlaneBeaconListener.h $(PREFIX)/include/XPlaneBeaconListener.h
 	install -D src/libsrc/XPlaneUDPClient.h $(PREFIX)/include/XPlaneUDPClient.h
-	mkdir -p $(PREFIX)/share/doc/$(NAME)$(MAJORVER)-dev
-	cp -r docs/* $(PREFIX)/share/doc/$(NAME)$(MAJORVER)-dev
+	mkdir -p $(PREFIX)/share/doc/$(PACKAGE)$(MAJORVER)-dev
+	cp -r docs/* $(PREFIX)/share/doc/$(PACKAGE)$(MAJORVER)-dev
 
 all: $(LIBFILE) $(EXE)

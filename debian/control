@@ -1,20 +1,23 @@
-Source: ${project}${sover}
+Source: ${PACKAGE}${MAJORVERSION}
+Version: ${MAJORVERSION}${MINORVERSION}
 Maintainer: shahada abubakar <shahada@abubakar.net>
 Section: misc
 Priority: optional
 Standards-Version : 3.9.2
 Build-Depends: debhelper (>= 9)
 
-Package: ${project}${sover}
-Architecture: any
+Package: ${PACKAGE}${MAJORVERSION}
+Architecture: ${ARCH}
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: UDP Client Library for XPlane
  Library to access X-Plane network API via UDP sockets.
 
 
-Package: ${project}${sover}-dev
-Architecture: any
+Package: ${PACKAGE}${MAJORVERSION}-dev
+Architecture: ${ARCH}
 Depends: ${shlibs:Depends}, ${misc:Depends}
+Provides: ${PACKAGE}-dev
+Conflicts:${PACKAGE}-dev
 Description: UDP Client Library for XPlane
  Library to access X-Plane network API via UDP sockets.
 
