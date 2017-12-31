@@ -3,7 +3,9 @@
 WHAT IS IT?
 
 This is a C++ shared library for accessing X-Plane (http://www.x-plane.com) 
-datarefs and commands over a network.
+datarefs and commands over a network. 
+
+For further details see http://blog.shahada.abubakar.net/post/linux-udp-network-client-library-for-x-plane-10-and-11 .
 
 
 INSTALLING FROM PACKAGE
