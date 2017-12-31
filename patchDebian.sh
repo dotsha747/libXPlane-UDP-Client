@@ -11,7 +11,7 @@ echo " - Patching Debian with PROJECT=${PROJECT} MAJORVERISON=${MAJORVERSION} MI
 
 PACKAGE=`echo ${PROJECT} | tr A-Z a-z`
 LIBNAME=`echo ${PROJECT} | sed -e 's/-//g'`
-ARCH=`arch | sed -e 's/x86_64/amd64/'`
+ARCH=`arch | sed -e 's/x86_64/amd64/' -e 's/armv[67]l/armhf/'`
 
 echo " - PACKAGE ${PACKAGE} LIBNAME ${LIBNAME}"
 
