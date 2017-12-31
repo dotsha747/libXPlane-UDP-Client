@@ -1,0 +1,49 @@
+*** libXplane-UDP-Client ***
+
+WHAT IS IT?
+
+This is a C++ shared library for accessing X-Plane (http://www.x-plane.com) 
+datarefs and commands over a network.
+
+
+INSTALLING FROM PACKAGE
+
+.deb packages are available for Ubuntu 16.04 LTS (for x86_64) and 
+Raspbian Stretch (for Raspberry Pi). To install, do the following:
+
+- Install the repository public key:
+	- From the repository itself:
+	  wget -O- http://repo.shahada.abubakar.net/pubkey.asc | sudo apt-key add -
+
+- Add the APT source:
+    cd /etc/apt/sources.list.d
+	- Ubuntu PC:
+		sudo wget http://repo.shahada.abubakar.net/ubuntu-xenial.repo.shahada.abubakar.net.sources.list
+  - Raspbian Stretch:
+		sudo wget http://repo.shahada.abubakar.net/raspbian-stretch.repo.shahada.abubakar.net.list
+
+- Install the binaries:
+  sudo apt-get update
+	sudo apt-get install libxplane-udp-client1 libxplane-udp-client1-dev libxplane-udp-client1-bin
+
+
+BUILDING FROM SOURCE
+
+  - Run "make" will build a shared library and tools.
+	- Running "make install" as root will install it.
+
+TEST TOOLS
+
+  - The library includes two test programs you can use as examples.
+
+	- TestXPlaneBeaconListener
+		
+		This monitors for "beacons" broadcast by X-Plane to your LAN.
+		A message is output for every beacon packet received.
+
+	- TestXPlaneUDPClient
+
+	  Monitors some data refs (aircraft name, throttle position) while
+		adjusting the throttle position in and out continously.
+
+
