@@ -21,6 +21,11 @@
 
 using namespace std;
 
+// globals
+bool found = false;
+string host;
+uint16_t port;
+
 // our callback for changed values.
 
 void receiverCallbackFloat(std::string dataref, float value) {
@@ -38,7 +43,12 @@ void receiverBeaconCallback(XPlaneBeaconListener::XPlaneServer server,
 		bool exists) {
 	cout << "receiverBeaconCallback got [" << server.toString() << " is "
 			<< (exists ? "alive" : "dead") << "]" << endl;
+	host = server.host;
+	port = server.receivePort;
+	found = true;
 }
+
+
 
 int main() {
 
@@ -47,48 +57,45 @@ int main() {
 					std::placeholders::_2));
 	XPlaneBeaconListener::getInstance()->setDebug(0);
 
-	XPlaneUDPClient xp("192.168.1.10", 49000,
+	cout << "Press Control-C to abort." << endl;
+
+	// wait for a server
+	while (!found) {
+		sleep (1);
+	}
+
+	cout << "Found server " << host << ":" << port << endl;
+
+
+	XPlaneUDPClient xp(host, port,
 			std::bind(receiverCallbackFloat, std::placeholders::_1,
 					std::placeholders::_2),
 			std::bind(receiverCallbackString, std::placeholders::_1,
 					std::placeholders::_2));
 	xp.setDebug(0);
 
-	cout << "!!!Hello World!!!" << endl; // prints !!!Hello World!!!
-
 	xp.subscribeDataRef("sim/aircraft/view/acf_descrip[0][40]", 1);
 	xp.subscribeDataRef("sim/cockpit2/engine/actuators/throttle_ratio[0]", 10);
-	xp.subscribeDataRef("laminar/B738/fmc1/Line00_L[0][25]", 2);
-	xp.subscribeDataRef("laminar/B738/fmc1/Line00_S[0][25]", 2);
-	xp.subscribeDataRef("laminar/B738/fmc1/Line_entry[0][25]", 2);
-	xp.subscribeDataRef("laminar/B738/fmc1/Line_entry_I[0][25]", 2);
-	xp.subscribeDataRef("sim/cockpit2/radios/actuators/audio_nav_selection", 2);
-	xp.subscribeDataRef("sim/flightmodel2/engines/engine_is_burning_fuel[0]",
-			1);
+
+	xp.sendCommand("sim/flight_controls/flaps_down");
+	xp.sendCommand("sim/flight_controls/flaps_down");
 
 	float r = 0;
-
-	xp.sendCommand("sim/flight_controls/pitch_trim_up");
+	float i = 0.01;
 
 	while (1) {
-		sleep(5);
+		usleep (1000 * 50);
 
-		list<XPlaneBeaconListener::XPlaneServer> s;
-		XPlaneBeaconListener::getInstance()->get(s);
-
-		int i = 1;
-		cout << "Current List of Servers [" << s.size() << "]:" << endl;
-		for (auto t : s) {
-			cout << i++ << ": " << t.toString() << endl;
-		}
-
-		xp.sendCommand("sim/flight_controls/flaps_down");
 		xp.setDataRef("sim/multiplayer/controls/engine_throttle_request[0]", r);
-		r += 0.1;
+		r += i;
+
+		if (r > 1) {
+			i = -0.01;
+		} else if (r < 0) {
+			i = 0.01;
+		}
 
 	}
 
-	cout << "Main done." << endl;
-	return 0;
 }
 

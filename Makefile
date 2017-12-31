@@ -70,9 +70,12 @@ $(LIBFILE):$(LIBOBJS)
 	ln -sf $(LIBFILE) $(LIBNAME).so
 
 
-$(EXE):$(TESTOBJS) $(LIBFILE)
-	@echo "\t[LD] $@"
-	$(CC) -L . -o $@ $< $(LDOPTS)
+src/test/TestXPlaneBeaconListener: $(TESTOBJS)
+	$(CC) -L . -o $@ src/test/TestXPlaneBeaconListener.o $(LIBNAME).so
+	
+
+src/test/TestXPlaneUDPClient: $(TESTOBJS)
+	$(CC) -L . -o $@ src/test/TestXPlaneUDPClient.o $(LIBNAME).so
 
 clean:
 	@echo "\t[CLEAN]"

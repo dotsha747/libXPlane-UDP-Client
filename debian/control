@@ -19,4 +19,13 @@ Provides: ${PACKAGE}-dev
 Conflicts:${PACKAGE}-dev
 Description: UDP Client Library for XPlane
  Library to access X-Plane network API via UDP sockets.
+ This package contains headers and files for development.
 
+Package: ${PACKAGE}${MAJORVERSION}-bin
+Architecture: ${ARCH}
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Provides: ${PACKAGE}-tools
+Conflicts:${PACKAGE}-tools
+Description: UDP Client Library for XPlane
+ Library to access X-Plane network API via UDP sockets.
+ This package contains tools for testing.
