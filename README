@@ -19,10 +19,7 @@ Raspbian Stretch (for Raspberry Pi). To install, do the following:
 
 - Add the APT source:
     cd /etc/apt/sources.list.d
-	- Ubuntu PC:
-		sudo wget http://repo.shahada.abubakar.net/ubuntu-xenial.repo.shahada.abubakar.net.sources.list
-  - Raspbian Stretch:
-		sudo wget http://repo.shahada.abubakar.net/raspbian-stretch.repo.shahada.abubakar.net.list
+		sudo wget http://repo.shahada.abubakar.net/repo.shahada.abubakar.net.sources.list
 
 - Install the binaries:
   sudo apt-get update
