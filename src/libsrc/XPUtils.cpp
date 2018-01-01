@@ -1,3 +1,26 @@
+/*
+ * XPUtils.cpp
+ *
+ *  Created on: Jul 27, 2017
+ *      Author: shahada
+ *
+ *  Copyright (c) 2017-2018 Shahada Abubakar.
+ *
+ *  This file is part of libXPlane-UDP-Client.
+ *
+ *  This program is free software: you can redistribute it and/or
+ *  modify it under the terms of the Lesser GNU General Public
+ *  License as  published by the Free Software Foundation, either
+ *  version 3 of the  License, or (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ *  See the GNU General Public License for more details.
+ *
+ */
+
 #include "XPUtils.h"
 
 #include <iostream>

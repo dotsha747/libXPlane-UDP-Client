@@ -3,6 +3,22 @@
  *
  *  Created on: Jul 27, 2017
  *      Author: shahada
+ *
+ *  Copyright (c) 2017-2018 Shahada Abubakar.
+ *
+ *  This file is part of libXPlane-UDP-Client.
+ *
+ *  This program is free software: you can redistribute it and/or
+ *  modify it under the terms of the Lesser GNU General Public
+ *  License as  published by the Free Software Foundation, either
+ *  version 3 of the  License, or (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ *  See the GNU General Public License for more details.
+ *
  */
 
 #include <iostream>
@@ -17,6 +33,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include "XPlaneBeaconListener.h"
 
@@ -33,7 +50,6 @@ XPlaneBeaconListener::XPlaneBeaconListener() {
 	std::thread t(&XPlaneBeaconListener::runListener, this);
 	t.detach();
 
-
 }
 
 XPlaneBeaconListener::~XPlaneBeaconListener() {
@@ -43,7 +59,7 @@ XPlaneBeaconListener::~XPlaneBeaconListener() {
 
 	while (isRunning && nowTime < time(NULL) - 5) {
 		if (debug) {
-		cerr << "waiting for XPlaneBeaconListener to stop" << endl;
+			cerr << "waiting for XPlaneBeaconListener to stop" << endl;
 		}
 	}
 
@@ -122,7 +138,7 @@ void XPlaneBeaconListener::runListener() {
 		throw runtime_error(buf.str());
 	}
 
-	time_t lastExpiredCheck = time (NULL);
+	time_t lastExpiredCheck = time(NULL);
 
 	isRunning = true;
 	while (!quitFlag) {
