@@ -160,7 +160,9 @@ void XPlaneBeaconListener::runListener() {
 			break;
 		}
 
-		else if (recv_len == 32 && memcmp(message, "BECN", 5) == 0) {
+
+
+		else if (recv_len > 5 && memcmp(message, "BECN", 5) == 0) {
 
 			// parse the message
 

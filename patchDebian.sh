@@ -23,6 +23,7 @@ sed -i -e "s/\${MAJORVERSION}/${MAJORVERSION}/" debian/control
 
 ln -sf ${PACKAGE}.install debian/${PACKAGE}${MAJORVERSION}.install
 ln -sf ${PACKAGE}-dev.install debian/${PACKAGE}${MAJORVERSION}-dev.install
+ln -sf ${PACKAGE}-bin.install debian/${PACKAGE}${MAJORVERSION}-bin.install
 
 
 # substitute variables into the contents of the .install files
