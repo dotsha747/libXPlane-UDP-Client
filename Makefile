@@ -70,11 +70,11 @@ $(LIBFILE):$(LIBOBJS)
 	ln -sf $(LIBFILE) $(LIBNAME).so
 
 
-src/test/TestXPlaneBeaconListener: $(TESTOBJS)
+src/test/TestXPlaneBeaconListener: $(TESTOBJS) $(LIBFILE)
 	$(CC) -L . -o $@ src/test/TestXPlaneBeaconListener.o $(LIBNAME).so
 	
 
-src/test/TestXPlaneUDPClient: $(TESTOBJS)
+src/test/TestXPlaneUDPClient: $(TESTOBJS) $(LIBFILE)
 	$(CC) -L . -o $@ src/test/TestXPlaneUDPClient.o $(LIBNAME).so
 
 clean:

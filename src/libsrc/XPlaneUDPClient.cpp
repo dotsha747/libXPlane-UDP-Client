@@ -151,10 +151,11 @@ XPlaneUDPClient::~XPlaneUDPClient() {
 
 	time_t nowTime = time(NULL);
 
-	while (isRunning && nowTime < time(NULL) - 5) {
+	while (isRunning && time(NULL) < nowTime + 5) {
 		if (debug) {
 			cerr << "waiting for XPlaneUDPClient to stop" << endl;
 		}
+		usleep (100000); // 10ms
 	}
 
 	if (isRunning) {
