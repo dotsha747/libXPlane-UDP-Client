@@ -149,7 +149,9 @@ void XPlaneBeaconListener::runListener() {
 
 		if (recv_len < 0) {
 
-			if (errno != EWOULDBLOCK) {
+			if(errno == EINTR)
+				continue;	//see http://250bpm.com/blog:12
+			if (errno != EWOULDBLOCK && errno != EAGAIN) {
 				ostringstream buf;
 				buf << "recvfrom returned " << recv_len << " errno is " << errno
 						<< endl;
