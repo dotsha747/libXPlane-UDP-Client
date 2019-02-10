@@ -34,6 +34,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <syslog.h>
 
 #include "XPlaneBeaconListener.h"
 
@@ -127,11 +128,27 @@ void XPlaneBeaconListener::runListener() {
 		throw runtime_error(buf.str());
 	}
 
-	/* subscribe multicast */
+	/* subscribe multicast
+	 *
+	 * Under systemd on raspbian multicast is sometimes is not available
+	 * even though "network-online.target" has been satisfied. This
+	 * retries for up to 5 seconds before giving up.
+	 */
+
 	mreq.imr_multiaddr.s_addr = inet_addr("239.255.1.1");
 	mreq.imr_interface.s_addr = htonl(INADDR_ANY);
-	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq))
-			< 0) {
+	int result;
+	int retry = 0;
+
+	do {
+		result = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
+		if (result < 0) {
+			retry++;
+			syslog (LOG_INFO, "Retrying subscribe to multicast (attempt %d)", retry);
+			sleep (1);
+		}
+	} while (result < 0 && retry < 5);
+	if (retry < 0) {
 		ostringstream buf;
 		buf << "XPlaneBeaconListner: setsockopt IP_ADD_MEMBERSHIP failed: "
 				<< strerror(errno);

@@ -339,7 +339,8 @@ void XPlaneUDPClient::listenerThread() {
 				//		<< " and nowTime-1 " << nowTime - 1 << " for en "
 				//		<< dataRef->getEn() << endl;
 
-				if (dataRef->getLastUpdate() < nowTime - 2) {
+				//if (dataRef->getLastUpdate() < nowTime - 6) {
+				if (dataRef->getLastUpdate() == 0) {
 
 					// not received in last 2 seconds. Send a subscribe request again.
 					uint32_t dref_freq = dataRef->getFreq();
