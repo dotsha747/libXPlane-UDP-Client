@@ -58,7 +58,7 @@ XPlaneBeaconListener::~XPlaneBeaconListener() {
 	quitFlag = true;
 	time_t nowTime = time(NULL);
 
-	while (isRunning && nowTime < time(NULL) - 5) {
+	while (isRunning && nowTime > time(NULL) - 5) {
 		if (debug) {
 			cerr << "waiting for XPlaneBeaconListener to stop" << endl;
 		}
