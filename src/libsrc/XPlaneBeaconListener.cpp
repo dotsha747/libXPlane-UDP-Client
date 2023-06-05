@@ -21,70 +21,79 @@
  *
  */
 
+#define _DEFAULT_SOURCE
+
 #include <iostream>
 #include <thread>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <windows.h>
+#include <ws2tcpip.h>
+#define ERRNO WSAGetLastError()
+#else
 #include <arpa/inet.h>
-#include <sstream>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h>
+//typedef int socklen_t;
+#define ERRNO errno
+#define WSAETIMEDOUT 10060
+#endif
+#include <sstream>
+#include <sys/types.h>
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
+#ifdef __linux__
 #include <syslog.h>
+#else
+inline void syslog(int /*prio*/, const char */*fmt*/, ...) {}   // TODO Windows Syslog not supported
+#define LOG_EMERG       0       /* system is unusable */
+#define LOG_ALERT       1       /* action must be taken immediately */
+#define LOG_CRIT        2       /* critical conditions */
+#define LOG_ERR         3       /* error conditions */
+#define LOG_WARNING     4       /* warning conditions */
+#define LOG_NOTICE      5       /* normal but significant condition */
+#define LOG_INFO        6       /* informational */
+#define LOG_DEBUG       7       /* debug-level messages */
+#endif
 
 #include "XPlaneBeaconListener.h"
 
 using namespace std;
 
 // initialize statics
-XPlaneBeaconListener *XPlaneBeaconListener::instance = NULL;
+XPlaneBeaconListener * XPlaneBeaconListener::instance = NULL;
 
-XPlaneBeaconListener::XPlaneBeaconListener()
-{
-    if (debug)
-    {
-        cout << __PRETTY_FUNCTION__ << endl;
-        fflush(stdout);
-    }
+XPlaneBeaconListener::XPlaneBeaconListener() {
+    cout << __PRETTY_FUNCTION__ << endl;
+    fflush(stdout);
     debug = 0;
     quitFlag = false;
     isRunning = false;
-    std::thread t(&XPlaneBeaconListener::runListener, this);
-    t.detach();
+    worker_thread = new std::thread(&XPlaneBeaconListener::runListener, this);
 }
 
 XPlaneBeaconListener::~XPlaneBeaconListener()
 {
-
+    setDebug(true);
     quitFlag = true;
     time_t nowTime = time(NULL);
+    cerr << "Waiting for XPlaneBeaconListener to stop: " << endl;
+    fflush(stderr);
 
-    while (isRunning && nowTime > time(NULL) - 5)
-    {
-        if (debug)
-        {
-            cerr << "waiting for XPlaneBeaconListener to stop: " << (time(NULL) - nowTime) << endl;
-            usleep(100000);
-        }
-    }
-
-    if (isRunning)
-    {
-        cerr << "... XPlaneBeaconListener failed to stop within 5 seconds."
-             << endl;
-    }
+    if(worker_thread!=nullptr && worker_thread->joinable())
+        worker_thread->join();
 }
 
-void XPlaneBeaconListener::runListener()
-{
+void XPlaneBeaconListener::runListener() {
 
     // https://web.cs.wpi.edu/~claypool/courses/4514-B99/samples/multicast.c
     // http://ntrg.cs.tcd.ie/undergrad/4ba2/multicast/antony/example.html
-
+    cerr << "Start " << __PRETTY_FUNCTION__ << endl;
+    fflush(stderr);
     struct sockaddr_in addr;
     socklen_t addrlen;
     int sock, recv_len;
@@ -93,52 +102,82 @@ void XPlaneBeaconListener::runListener()
 
     /* set up socket */
     sock = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock < 0)
-    {
+    if (sock < 0) {
         perror("socket");
         exit(1);
     }
-    bzero((char *)&addr, sizeof(addr));
+    memset((char *) &addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     addr.sin_port = htons(49707);
     addrlen = sizeof(addr);
 
     /* allow multiple sockets to use the same ADDR */
+#ifdef _WIN32
+    char yes = 1;
+#else
     u_int yes = 1;
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0)
+#endif
+
+    if(debug)
     {
-        ostringstream buf;
-        buf << "XPlaneBeaconListener: Reusing ADDR failed: " << strerror(errno);
-        throw runtime_error(buf.str());
+        cerr << "1: " << __PRETTY_FUNCTION__ << endl;
+        fflush(stderr);
     }
 
-    /* allow multiple sockets to use the same ADDR */
-    if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes)) < 0)
-    {
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)) < 0) {
         ostringstream buf;
-        buf << "XPlaneBeaconListener: Reusing PORT failed: " << strerror(errno);
+        buf << "XPlaneBeaconListener: Reusing ADDR failed: " << strerror(ERRNO);
+        throw (buf.str());
+    }
+
+    if(debug)
+    {
+        cerr << "2: " << __PRETTY_FUNCTION__ << endl;
+        fflush(stderr);
+    }
+    // SO_REUSEPORT not needed on WIN32
+#ifndef _WIN32
+    /* allow multiple sockets to use the same ADDR */
+    if (setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(yes)) < 0) {
+        ostringstream buf;
+        buf << "XPlaneBeaconListener: Reusing PORT failed: " << strerror(ERRNO);
         throw runtime_error(buf.str());
     }
+#endif
 
     /* timeout after 1 second if no data received */
+#ifdef _WIN32
+    DWORD tv;
+    tv = 10000;
+    cerr << "timeout : " << tv << endl;
+    fflush(stderr);
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,(char *) &tv,
+                   sizeof(tv))) {
+        ostringstream buf;
+        buf << "XPlaneBeaconListener: set SO_RCVTIMEO failed: "
+            << strerror(ERRNO);
+        throw runtime_error(buf.str());
+    }
+#else
     struct timeval tv;
     tv.tv_sec = 1;
     tv.tv_usec = 0;
-    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *)&tv,
-                   sizeof(struct timeval)))
-    {
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv,
+                   sizeof(struct timeval))) {
         ostringstream buf;
         buf << "XPlaneBeaconListener: set SO_RCVTIMEO failed: "
-            << strerror(errno);
+            << strerror(ERRNO);
         throw runtime_error(buf.str());
     }
+#endif
+    cerr << "3: " << __PRETTY_FUNCTION__ << endl;
+    fflush(stderr);
 
     /* receive */
-    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-    {
+    if (bind(sock, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
         ostringstream buf;
-        buf << "XPlaneBeaconListener: bind failed: " << strerror(errno);
+        buf << "XPlaneBeaconListener: bind failed. ERRNO: " << ERRNO << " : " << strerror(ERRNO);
         throw runtime_error(buf.str());
     }
 
@@ -154,90 +193,142 @@ void XPlaneBeaconListener::runListener()
     int result;
     int retry = 0;
 
-    do
-    {
-        result = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq));
-        if (result < 0)
-        {
+    do {
+        result = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (const char*) &mreq, sizeof(mreq));
+        if (result < 0) {
             retry++;
-            syslog(LOG_INFO, "Retrying subscribe to multicast (attempt %d)", retry);
-            sleep(1);
+            syslog (LOG_INFO, "Retrying subscribe to multicast (attempt %d)", retry);
+            cerr << "Retrying subscribe to multicast (attempt " << retry << ")" << endl;
+            fflush(stderr);
+            sleep (1);
         }
     } while (result < 0 && retry < 5);
-    if (retry < 0)
-    {
+
+    if (retry < 0) {
         ostringstream buf;
         buf << "XPlaneBeaconListner: setsockopt IP_ADD_MEMBERSHIP failed: "
-            << strerror(errno);
+            << strerror(ERRNO);
+        cerr << "XPlaneBeaconListner: setsockopt IP_ADD_MEMBERSHIP failed: "
+             << strerror(ERRNO) << " retry: " << retry << endl;
+        fflush(stderr);
         throw runtime_error(buf.str());
     }
+
 
     time_t lastExpiredCheck = time(NULL);
 
     isRunning = true;
     while (!quitFlag)
     {
-
+        if(debug)
+        {
+            cerr << "loop " << __PRETTY_FUNCTION__ << endl;
+            fflush(stderr);
+        }
         recv_len = recvfrom(sock, message, sizeof(message), 0,
-                            (struct sockaddr *)&addr, &addrlen);
+                            (struct sockaddr *) &addr, &addrlen);
         time_t nowTime = time(NULL);
+
+        if(debug)
+        {
+            cerr << "loop2 " << __PRETTY_FUNCTION__ << endl;
+            fflush(stderr);
+        }
 
         if (recv_len < 0)
         {
-
-            if (errno == EINTR)
-                continue; // see http://250bpm.com/blog:12
-            if (errno != EWOULDBLOCK && errno != EAGAIN)
+            if(debug)
             {
+                cerr << "loop3 " << __PRETTY_FUNCTION__ << endl;
+                fflush(stderr);
+            }
+            if(ERRNO == EINTR)
+                continue;	//see http://250bpm.com/blog:12
+            if (ERRNO != EWOULDBLOCK && ERRNO != EAGAIN && ERRNO != WSAETIMEDOUT)
+            {
+                if(debug)
+                {
+                    cerr << "loop3.1 " << ERRNO << __PRETTY_FUNCTION__ << endl;
+                    cerr << "recvfrom returned " << recv_len << " ERRNO is " << ERRNO << endl;
+                }
+
+                fflush(stderr);
                 ostringstream buf;
-                buf << "recvfrom returned " << recv_len << " errno is " << errno
+                buf << "recvfrom returned " << recv_len << " errno is " << ERRNO
                     << endl;
                 throw runtime_error(buf.str());
-            };
+            }
         }
         else if (recv_len == 0)
         {
             break;
         }
-
         else if (recv_len > 5 && memcmp(message, "BECN", 5) == 0)
         {
-
+            if(debug)
+            {
+                cerr << "loop4 " << __PRETTY_FUNCTION__ << endl;
+                fflush(stderr);
+            }
             // parse the message
 
             XPlaneServer s(nowTime, message, inet_ntoa(addr.sin_addr));
 
+            if(debug)
+            {
+                cerr << "loop5 " << __PRETTY_FUNCTION__ << endl;
+                fflush(stderr);
+            }
             cachedServersMutex.lock();
             ostringstream key;
             key << s.host << ":" << s.name << ":" << s.receivePort;
 
-            if (cachedServers.find(key.str()) == cachedServers.end())
-            {
-                for (auto callback : callbacks)
-                {
+            if (cachedServers.find(key.str()) == cachedServers.end()) {
+                for (auto callback : callbacks) {
                     callback(s, true);
                 }
             }
             cachedServers[key.str()] = s;
             cachedServersMutex.unlock();
-        };
+            if(debug)
+            {
+                cerr << "loop6 " << __PRETTY_FUNCTION__ << endl;
+                fflush(stderr);
+            }
+        }
 
         // Check the list of servers we have for expired servers.
         if (lastExpiredCheck < nowTime)
         {
+            if(debug)
+            {
+                cerr << "loop7 " << __PRETTY_FUNCTION__ << endl;
+                fflush(stderr);
+            }
             checkForExpiredServers();
             lastExpiredCheck = nowTime;
         }
     }
 
     // exit requested.
-    close(sock);
+    if(debug)
+    {
+        cerr << "loop8 " << __PRETTY_FUNCTION__ << endl;
+        fflush(stderr);
+    }
+    if(sock > 0)
+    {
+        cerr << "Shutdown sock: " << sock << endl;
+        fflush(stderr);
+        shutdown(sock,2);
+    }
     isRunning = false;
+    cerr << "End " << __PRETTY_FUNCTION__ << endl;
+    fflush(stderr);
 }
 
-XPlaneBeaconListener::XPlaneServer::XPlaneServer(time_t time, char *msg,
-                                                 char *_host)
-{
+XPlaneBeaconListener::XPlaneServer::XPlaneServer(time_t time, char * msg,
+                                                 char * _host) {
 
     prologue = msg;
 
@@ -248,17 +339,17 @@ XPlaneBeaconListener::XPlaneServer::XPlaneServer(time_t time, char *msg,
     memcpy(&versionNumber, msg + 11, 4);
     memcpy(&role, msg + 15, 4);
     memcpy(&receivePort, msg + 19, 2);
-    name = (char *)msg + 21;
+    name = (char *) msg + 21;
     host = _host;
+
 }
 
-std::string XPlaneBeaconListener::XPlaneServer::toString()
-{
+std::string XPlaneBeaconListener::XPlaneServer::toString() {
 
     ostringstream s;
     s << "XPlaneServer [ prologue: " << prologue << " beaconMajorVersion:"
-      << (int)beaconMajorVersion << " beaconMinorVersion:"
-      << (int)beaconMinorVersion << " applicationHostID:"
+      << (int) beaconMajorVersion << " beaconMinorVersion:"
+      << (int) beaconMinorVersion << " applicationHostID:"
       << applicationHostId << " versionNumber:" << versionNumber
       << " role:" << role << " receivePort: " << receivePort << " name:"
       << name << " host:" << host << "]" << endl;
@@ -266,44 +357,39 @@ std::string XPlaneBeaconListener::XPlaneServer::toString()
 }
 
 void XPlaneBeaconListener::get(
-    std::list<XPlaneBeaconListener::XPlaneServer> &ret)
-{
+        std::list<XPlaneBeaconListener::XPlaneServer> & ret) {
 
     cachedServersMutex.lock();
     ret.clear();
-    for (auto server : cachedServers)
-    {
+    for (auto server : cachedServers) {
         ret.push_back(server.second);
     }
 
     cachedServersMutex.unlock();
+
 }
 
 void XPlaneBeaconListener::registerNotificationCallback(
-    std::function<void(XPlaneServer server, bool exists)> callback)
-{
+        std::function<void(XPlaneServer server, bool exists)> callback) {
     callbacks.push_back(callback);
 }
 
 void XPlaneBeaconListener::checkForExpiredServers()
 {
-    if (quitFlag)
+    if(quitFlag)
+    {
         return;
+    }
     cachedServersMutex.lock();
     time_t nowTime = time(NULL);
-    for (auto it = cachedServers.cbegin(); it != cachedServers.cend();)
-    {
+    for (auto it = cachedServers.cbegin(); it != cachedServers.cend();) {
         // see if it has expired, i.e. we haven't received any beacons in last 30 seconds.
-        if (it->second.received < nowTime - 30)
-        {
-            for (auto callback : callbacks)
-            {
+        if (it->second.received < nowTime - 30) {
+            for (auto callback : callbacks) {
                 callback(it->second, false);
             }
             cachedServers.erase(it++); // or "it = m.erase(it)" since C++11
-        }
-        else
-        {
+        } else {
             ++it;
         }
     }

@@ -31,6 +31,7 @@
 #include <list>
 #include <mutex>
 #include <functional>
+#include <thread>
 
 
 /** All running X-Plane instances broadcast their presence on the LANs they
@@ -65,6 +66,7 @@ private:
 	XPlaneBeaconListener(); // private so it cannot be called
 	XPlaneBeaconListener(XPlaneBeaconListener const &) {}; // private so it cannot be called
 	XPlaneBeaconListener & operator= (XPlaneBeaconListener const &) { abort();};
+    std::thread * worker_thread;
 
 public:
 
@@ -97,9 +99,7 @@ public:
 	}
 
 	virtual ~XPlaneBeaconListener();
-
 	void get (std::list<XPlaneBeaconListener::XPlaneServer> & ret);
-
 	void registerNotificationCallback (std::function<void(XPlaneServer server, bool exists)> callback);
 
 protected:
