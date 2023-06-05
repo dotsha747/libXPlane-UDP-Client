@@ -69,8 +69,8 @@ class XPlaneUDPClient {
 	int debug;
 
 	// receiver callback
-	std::function<void(std::string, float)> receiverCallbackFloat;
-	std::function<void(std::string, std::string)> receiverCallbackString;
+    std::function<void(std::string, float)> receiverCallbackFloat;
+    std::function<void(std::string, std::string)> receiverCallbackString;
 
 	class SubscribedCharArray {
 		std::string dataRefName;
@@ -182,8 +182,8 @@ protected:
 public:
 
 	XPlaneUDPClient(std::string _server, uint16_t _port,
-			std::function<void(std::string, float)> _receiverCallbackFloat,
-			std::function<void(std::string, std::string)> _receiverCallbackString
+            std::function<void(std::string, float)> _receiverCallbackFloat,
+            std::function<void(std::string, std::string)> _receiverCallbackString
 			);
 	virtual ~XPlaneUDPClient();
 
@@ -198,7 +198,8 @@ public:
 
 	void setDataRef (std::string dataRef, float value);
 	void setDataRefString (std::string dataRef, std::string);
-
+    void sendVEHX(int p, double dat_lat, double dat_lon, double dat_ele, float veh_psi_true, float veh_the, float veh_phi);
+    void sendACFN(int p, std::string acf_file, int livery_index);
 
 };
 
