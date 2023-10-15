@@ -31,6 +31,7 @@
 #include "XPlaneUDPClient.h"
 
 #include <string.h>
+#include <signal.h>
 
 #include "XPUtils.h"
 
@@ -38,6 +39,7 @@ using namespace std;
 
 // globals
 bool found = false;
+string hostname;
 string host;
 uint16_t port;
 
@@ -60,10 +62,26 @@ void receiverBeaconCallback(XPlaneBeaconListener::XPlaneServer server,
 			<< (exists ? "alive" : "dead") << "]" << endl;
 	host = server.host;
 	port = server.receivePort;
+    hostname = server.name;
 	found = true;
 }
 
 
+static volatile int s_interrupted = 0;
+static void s_signal_handler (int signal_value)
+{
+    s_interrupted = 1;
+}
+
+static void s_catch_signals (void)
+{
+    struct sigaction action;
+    action.sa_handler = s_signal_handler;
+    action.sa_flags = 0;
+    sigemptyset (&action.sa_mask);
+    sigaction (SIGINT, &action, NULL);
+    sigaction (SIGTERM, &action, NULL);
+}
 
 int main() {
 
@@ -72,34 +90,38 @@ int main() {
 					std::placeholders::_2));
 	XPlaneBeaconListener::getInstance()->setDebug(0);
 
+    s_catch_signals();
+
 	cout << "Press Control-C to abort." << endl;
 
 	// wait for a server
-	while (!found) {
+    while (!found && s_interrupted == 0) {
 		sleep (1);
 	}
 
-	cout << "Found server " << host << ":" << port << endl;
+    cout << "Found server " << hostname << " " << host << ":" << port << endl;
 
+    return 0;
 
 	XPlaneUDPClient xp(host, port,
 			std::bind(receiverCallbackFloat, std::placeholders::_1,
 					std::placeholders::_2),
 			std::bind(receiverCallbackString, std::placeholders::_1,
 					std::placeholders::_2));
-	xp.setDebug(0);
+    xp.setDebug(1);
 
 	xp.subscribeDataRef("sim/aircraft/view/acf_descrip[0][40]", 1);
-	xp.subscribeDataRef("sim/cockpit2/engine/actuators/throttle_ratio[0]", 10);
+    xp.subscribeDataRef("sim/cockpit2/engine/actuators/throttle_ratio[0]", 2);
 
 	xp.sendCommand("sim/flight_controls/flaps_down");
 	xp.sendCommand("sim/flight_controls/flaps_down");
+    xp.unsubscribeDataRef("sim/aircraft/view/acf_descrip[0][40]");
 
 	float r = 0;
 	float i = 0.01;
 
-	while (1) {
-		usleep (1000 * 50);
+    while (s_interrupted == 0) {
+        usleep (1000 * 1000);
 
 		xp.setDataRef("sim/multiplayer/controls/engine_throttle_request[0]", r);
 		r += i;
@@ -110,7 +132,10 @@ int main() {
 			i = 0.01;
 		}
 
+        if(r>0.05)
+            s_interrupted = 1;
+
 	}
 
+    return 0;
 }
-

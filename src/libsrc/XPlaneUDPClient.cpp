@@ -24,11 +24,22 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <winsock.h>
+#include <ws2tcpip.h>
+#define ERRNO WSAGetLastError()
+#else
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/uio.h>
+#define ERRNO errno
+#define WSAETIMEDOUT 10060
+#endif
+
 #include <iostream>
 #include <thread>
 #include <stdexcept>
@@ -42,575 +53,714 @@
 using namespace std;
 
 XPlaneUDPClient::SubscribedDataRef::SubscribedDataRef(std::string _dataRef,
-		uint32_t _en, int _minFreq, bool _emitable,
-		SubscribedCharArray * _sca) {
+                                                      uint32_t _en, int _minFreq, bool _emitable,
+                                                      SubscribedCharArray * _sca) {
 
-	dataRef = _dataRef;
-	en = _en;
-	minFreq = _minFreq;
+    cerr << __PRETTY_FUNCTION__ << endl;
 
-	// defaults
-	emitable = _emitable;
-	partOfCharArray = _sca;
-	first = true;
-	value = -12345;
+    dataRef = _dataRef;
+    en = _en;
+    minFreq = _minFreq;
 
-	// if part of a char array, add the en to the list
-	if (_sca != NULL) {
-		_sca->addToEnList(_en);
-	}
+    // defaults
+    emitable = _emitable;
+    partOfCharArray = _sca;
+    first = true;
+    value = -12345;
 
-	ts = 0;
-	value = 0;
+    // if part of a char array, add the en to the list
+    if (_sca != NULL) {
+        _sca->addToEnList(_en);
+    }
 
-	// extract array index out of dataRef if there is one.
-	regex r("^.*\\[(\\d+)\\]$");
-	smatch matches;
+    ts = 0;
+    value = 0;
 
-	if (regex_match(_dataRef, matches, r)) {
-		arrIndex = stoi(matches[1]);
-	}
+    // extract array index out of dataRef if there is one.
+    regex r("^.*\\[(\\d+)\\]$");
+    smatch matches;
 
+    if (regex_match(_dataRef, matches, r)) {
+        arrIndex = stoi(matches[1]);
+    }
 }
 
 std::string XPlaneUDPClient::SubscribedDataRef::getDataRefName() {
 
-	return dataRef;
+    return dataRef;
 }
 
 uint32_t XPlaneUDPClient::SubscribedDataRef::getEn() {
-	return en;
+    return en;
 }
 
 uint32_t XPlaneUDPClient::SubscribedDataRef::getFreq() {
-	return minFreq;
+    return minFreq;
 }
 
 void XPlaneUDPClient::SubscribedDataRef::setFreq(uint32_t _minFreq) {
-	minFreq = _minFreq;
+    minFreq = _minFreq;
 }
 
 // =============================================================================
 
 XPlaneUDPClient::XPlaneUDPClient(std::string _server, uint16_t _port,
-		std::function<void(std::string, float)> _receiverCallbackFloat,
-		std::function<void(std::string, std::string)> _receiverCallbackString) {
+                                 std::function<void(std::string, std::string, float)> _receiverCallbackFloat,
+                                 std::function<void(std::string, std::string, std::string)> _receiverCallbackString) {
 
-	server = _server;
-	port = _port;
-	receiverCallbackFloat = _receiverCallbackFloat;
-	receiverCallbackString = _receiverCallbackString;
-	lastUnsubscribeCheck = 0L;
-	quitFlag = false;
-	isRunning = false;
-	debug = 0;
+    server = _server;
+    port = _port;
+    receiverCallbackFloat = _receiverCallbackFloat;
+    receiverCallbackString = _receiverCallbackString;
+    lastUnsubscribeCheck = 0L;
+    quitFlag = false;
+    isRunning = false;
 
-	lastEn = 0;
+    debug = 0;
 
-	// setup socket
-	sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (sock == -1) {
-		throw runtime_error("Unable to create UDP socket");
-	}
+    lastEn = 0;
 
-	struct sockaddr_in srcaddr;
-	memset((char *) &srcaddr, 0, sizeof(srcaddr));
-	srcaddr.sin_family = AF_INET;
-	srcaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-	srcaddr.sin_port = htons(0);
+    // setup socket
+    sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == -1) {
+        throw runtime_error("Unable to create UDP socket");
+    }
 
-	struct timeval tv;
-	tv.tv_sec = 1;
-	tv.tv_usec = 0;
-	if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv,
-			sizeof(struct timeval))) {
-		perror("setsockopt: rcvtimeo");
-		exit(1);
-	}
+    struct sockaddr_in srcaddr;
+    memset((char *) &srcaddr, 0, sizeof(srcaddr));
+    srcaddr.sin_family = AF_INET;
+    srcaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    srcaddr.sin_port = htons(0);
 
-	// bind
-	if (bind(sock, (struct sockaddr *) &srcaddr, sizeof(srcaddr)) < 0) {
-		throw runtime_error("Unable to bind socket");
-	}
+#ifdef _WIN32
+    DWORD tv;
+    tv = 1000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char *) &tv,
+                   sizeof(tv))) {
+        perror("setsockopt: rcvtimeo");
+        //exit(1);
+    }
+#else
+    struct timeval tv;
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (struct timeval *) &tv,
+                   sizeof(struct timeval))) {
+        perror("setsockopt: rcvtimeo");
+        exit(1);
+    }
+#endif
+    // bind
+    if (bind(sock, (struct sockaddr *) &srcaddr, sizeof(srcaddr)) < 0) {
+        throw runtime_error("Unable to bind socket");
+    }
 
-	// setup dest address
-	memset((void *) &serverAddr, 0, sizeof(serverAddr));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_addr.s_addr = inet_addr(server.c_str());
-	serverAddr.sin_port = htons(port);
-	slen = sizeof(serverAddr);
+    // setup dest address
+    memset((void *) &serverAddr, 0, sizeof(serverAddr));
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr(server.c_str());
+    serverAddr.sin_port = htons(port);
+    slen = sizeof(serverAddr);
 
-	// launch listener thread
-	std::thread t(&XPlaneUDPClient::listenerThread, this);
-	t.detach();
+    // launch listener thread
+    std::thread t(&XPlaneUDPClient::listenerThread, this);
+    t.detach();
 }
 
 XPlaneUDPClient::~XPlaneUDPClient() {
+    cerr << __PRETTY_FUNCTION__ << " Begin!\n";
 
-	quitFlag = true;
+    quitFlag = true;
 
-	time_t nowTime = time(NULL);
+    time_t nowTime = time(NULL);
 
-	while (isRunning && time(NULL) < nowTime + 5) {
-		if (debug) {
-			cerr << "waiting for XPlaneUDPClient to stop" << endl;
-		}
-		usleep (100000); // 10ms
-	}
+    while (isRunning && time(NULL) < nowTime + 5) {
+        if (debug) {
+            cerr << "waiting for XPlaneUDPClient to stop" << endl;
+        }
+        usleep (100000); // 10ms
+    }
 
-	if (isRunning) {
-		cerr << "... XPlaneUDPClient failed to stop within 5 seconds." << endl;
-	} else {
+    if (isRunning) {
+        cerr << "... XPlaneUDPClient failed to stop within 5 seconds." << endl;
+    } else {
 
-		// unsubscribe from everything
-		dataRefMutex.lock();
-		for (auto dataRef : dataRefs) {
-			char buf[413];
-			memset(buf, 0, sizeof(buf));
+        if (true || debug) {
+            cerr << "Unsubscribe from "; // << endl;
+        }
+        // unsubscribe from everything
+        dataRefMutex.lock();
+        for (auto dataRef : dataRefs) {
+            if (true || debug)
+                cout << dataRef->getDataRefName() << " ";
+            char buf[413];
+            memset(buf, 0, sizeof(buf));
 
-			uint32_t zero = 0;
-			uint32_t en = dataRef->getEn();
-			strcpy(buf, "RREF");
-			memcpy(buf + 5, &zero, 4);
-			memcpy(buf + 9, &en, 4);
+            uint32_t zero = 0;
+            uint32_t en = dataRef->getEn();
+            strcpy(buf, "RREF");
+            memcpy(buf + 5, &zero, 4);
+            memcpy(buf + 9, &en, 4);
 
-			sendto(sock, (void *) buf, sizeof(buf), 0,
-					(struct sockaddr *) &serverAddr, slen);
-		}
+            sendto(sock, (void *) buf, sizeof(buf), 0,
+                   (struct sockaddr *) &serverAddr, slen);
+        }
+        if (debug)
+            cout << " DataRef." << endl;
+        try {
+            if (debug)
+                cerr << "Trying dataRefs.clear()\n";
+            dataRefs.clear();
+            if (debug)
+                cerr << "Trying dataRefByNameIndex.clear()\n";
+            dataRefByNameIndex.clear();
+            if (debug)
+                cerr << "Trying dataRefByEnIndex.clear()\n";
+            dataRefByEnIndex.clear();
+        }  catch (...) {
+            cerr << "Clear unsuccessful!\n";
+        }
+        dataRefMutex.unlock();
+    }
 
-		dataRefs.clear();
-		dataRefByNameIndex.clear();
-		dataRefByEnIndex.clear();
-		dataRefMutex.unlock();
-	}
-
-	close(sock);
+    if(sock > 0)
+    {
+        if (debug)
+            cerr << "Now close socket: " << sock << endl;
+        close(sock);
+    }
+    cerr << __PRETTY_FUNCTION__ << " end!\n";
 }
 
 void XPlaneUDPClient::listenerThread() {
 
-	if (debug) {
-		cerr << "In XPlaneUDPClient listenerThread" << endl;
-	}
+    if (debug) {
+        cerr << "In XPlaneUDPClient listenerThread" << endl;
+    }
 
-	uint8_t buf[1024];
-	struct sockaddr remoteAddr;
-	socklen_t slen = sizeof(remoteAddr);
-	int recv_len;
-	isRunning = true;
-	while (!quitFlag) {
+    uint8_t buf[1024];
+    struct sockaddr remoteAddr;
+    socklen_t slen = sizeof(remoteAddr);
+    int recv_len;
+    isRunning = true;
+    while (!quitFlag) {
 
-		// this will timeout after 1 second if nothing is received, due to
-		// the socket option set earlier.
+        // this will timeout after 1 second if nothing is received, due to
+        // the socket option set earlier.
 
-		if ((recv_len = recvfrom(sock, buf, sizeof(buf), 0,
-				(struct sockaddr *) &remoteAddr, &slen)) < 0) {
+        if ((recv_len = recvfrom(sock, buf, sizeof(buf), 0,
+                                 (struct sockaddr *) &remoteAddr, &slen)) < 0) {
 
-			if (errno != EWOULDBLOCK) {
-				ostringstream buf;
-				buf << "recvfrom returned " << recv_len << " errno is " << errno
-						<< endl;
-				throw runtime_error(buf.str());
-			};
+            if(ERRNO == EINTR)
+                continue;	//see http://250bpm.com/blog:12
+            else if (ERRNO == ECONNRESET || ERRNO == 10054) // 10054 = WSAECONNRESET, quit normally on connection reset by pear
+            {
+                quitFlag = true;
+                continue;
+            }
+            else if(ERRNO != EWOULDBLOCK && ERRNO != EAGAIN && ERRNO != WSAETIMEDOUT)
+            {
+                ostringstream buf;
+                buf << "recvfrom returned " << recv_len << " errno is " << ERRNO << endl;
+                cerr << buf.str();
+                fflush(stderr);
+                throw runtime_error(buf.str());
+            }
 
-		};
+        }
 
-		time_t nowTime = time(NULL);
+        time_t nowTime = time(NULL);
 
-		// check for RREF
+        // check for RREF
 
-		if (recv_len >= 4 && buf[0] == 'R' && buf[1] == 'R' && buf[2] == 'E'
-				&& buf[3] == 'F') {
+        if (recv_len >= 4 && buf[0] == 'R' && buf[1] == 'R' && buf[2] == 'E'
+                && buf[3] == 'F') {
 
-			// 9, 10, 11, 12 = value
-			// 13, 14, 15, 16 = en
+            // 9, 10, 11, 12 = value
+            // 13, 14, 15, 16 = en
 
-			// cerr << nowTime << " Received RREF of " << recv_len << " bytes"
-			// 		<< endl;
+            // cerr << nowTime << " Received RREF of " << recv_len << " bytes"
+            // 		<< endl;
 
-			for (int idx = 5; idx < recv_len; idx += 8) {
+            for (int idx = 5; idx < recv_len; idx += 8) {
 
-				// get value
-				float value = xflt2float(&(buf[idx + 4]));
+                // get value
+                float value = xflt2float(&(buf[idx + 4]));
 
-				// get en
-				uint32_t en = xint2uint32(&(buf[idx]));
+                // get en
+                uint32_t en = xint2uint32(&(buf[idx]));
 
-				// cerr << " idx is " << idx << " en is " << en << " value is "
-				//		<< value << endl;
+                // cerr << " idx is " << idx << " en is " << en << " value is "
+                //		<< value << endl;
 
-				// is it something we subscribed to?
-				auto sdri = dataRefByEnIndex.find(en);
-				if (sdri == dataRefByEnIndex.end()) {
+                // is it something we subscribed to?
+                auto sdri = dataRefByEnIndex.find(en);
+                if (sdri == dataRefByEnIndex.end()) {
 
-					// not subscribed ... let's get rid of it.
-					char buf[413];
-					memset(buf, 0, sizeof(buf));
+                    // not subscribed ... let's get rid of it.
+                    char buf[413];
+                    memset(buf, 0, sizeof(buf));
 
-					uint32_t zero = 0;
-					strcpy(buf, "RREF");
-					memcpy(buf + 5, &zero, 4);
-					memcpy(buf + 9, &en, 4);
+                    uint32_t zero = 0;
+                    strcpy(buf, "RREF");
+                    memcpy(buf + 5, &zero, 4);
+                    memcpy(buf + 9, &en, 4);
 
-					sendto(sock, (void *) buf, sizeof(buf), 0,
-							(struct sockaddr *) &serverAddr, slen);
+                    sendto(sock, (void *) buf, sizeof(buf), 0,
+                           (struct sockaddr *) &serverAddr, slen);
 
-					if (debug) {
-						cerr << "Unsubscribing from non-subscribed dataref en="
-								<< en << endl;
-					}
+                    if (debug) {
+                        cerr << "Unsubscribing from non-subscribed dataref en="
+                             << en << endl;
+                    }
 
-				} else {
-					// subscribed
-					SubscribedDataRef * sdr = (*sdri).second;
+                } else {
+                    // subscribed
+                    SubscribedDataRef * sdr = (*sdri).second;
 
-					// is it emitable?
-					if (sdr->getEmitable()) {
+                    // is it emitable?
+                    if (sdr->getEmitable()) {
 
-						// is it part of a char array?
-						SubscribedCharArray * sca =
-								sdr->getSubscribedCharArray();
-						if (sca == NULL) {
+                        // is it part of a char array?
+                        SubscribedCharArray * sca =
+                                sdr->getSubscribedCharArray();
+                        if (sca == NULL) {
 
-							// no, so just emit the data as a float
-							float oldValue = sdr->getValue();
-							sdr->setValue(nowTime, value);
+                            // no, so just emit the data as a float
+                            float oldValue = sdr->getValue();
+                            sdr->setValue(nowTime, value);
 
-							if (sdr->getFirst() == true || oldValue != value) {
-								receiverCallbackFloat(sdr->getDataRefName(),
-										value);
-								sdr->setFirst(false);
+                            if (sdr->getFirst() == true || oldValue != value) {
+                                receiverCallbackFloat(getServer(),
+                                                      sdr->getDataRefName(),
+                                                      value);
+                                sdr->setFirst(false);
 
-							}
+                            }
 
-						} else {
+                        } else {
 
-							// a bit more work if it is a char array. Iterate through
-							// each of the elements of the char array's datarefs,
-							// appending the values as chars to a string.
+                            // a bit more work if it is a char array. Iterate through
+                            // each of the elements of the char array's datarefs,
+                            // appending the values as chars to a string.
 
-							// save the value and timestamp for this char
-							sdr->setValue(nowTime, value);
+                            // save the value and timestamp for this char
+                            sdr->setValue(nowTime, value);
 
-							ostringstream stringValue;
-							int i = sca->getRangeFrom();
-							char c;
-							do {
-								uint32_t subEn = sca->getEn(
-										i - sca->getRangeFrom());
-								SubscribedDataRef * subSdr =
-										dataRefByEnIndex.find(subEn)->second;
-								c = (char) subSdr->getValue();
-								if (c != 0) {
-									stringValue << c;
-								}
-								i++;
-							} while ((i <= sca->getRangeTo()) && (c != '\0'));
+                            ostringstream stringValue;
+                            int i = sca->getRangeFrom();
+                            char c;
+                            do {
+                                uint32_t subEn = sca->getEn(
+                                            i - sca->getRangeFrom());
+                                SubscribedDataRef * subSdr =
+                                        dataRefByEnIndex.find(subEn)->second;
+                                c = (char) subSdr->getValue();
+                                if (c != 0) {
+                                    stringValue << c;
+                                }
+                                i++;
+                            } while ((i <= sca->getRangeTo()) && (c != '\0'));
 
-							// emit as a string only if first time or value has changed.
-							if (sca->getFirst() == true
-									|| sca->getValue() != stringValue.str()) {
-								receiverCallbackString(sca->getDataRefName(),
-										stringValue.str());
-								sca->setFirst(false);
-								sca->setValue(stringValue.str());
-							}
+                            // emit as a string only if first time or value has changed.
+                            if (sca->getFirst() == true
+                                    || sca->getValue() != stringValue.str()) {
+                                receiverCallbackString(getServer(),
+                                                       sca->getDataRefName(),
+                                                       stringValue.str());
+                                sca->setFirst(false);
+                                sca->setValue(stringValue.str());
+                            }
 
-						}
-					} else {
-						// not emitable, just save it so we update the ts.
-						sdr->setValue(nowTime, value);
-					}
-				}
-			}
-		};
+                        }
+                    } else {
+                        // not emitable, just save it so we update the ts.
+                        sdr->setValue(nowTime, value);
+                    }
+                }
+            }
+        }
 
-		// else check for other messages here. Be sure to check recv_len first as
-		// we can also receive -1 if socket timeouts.
+        // else check for other messages here. Be sure to check recv_len first as
+        // we can also receive -1 if socket timeouts.
 
-		// Check for unsubscribed RREFs. These are where we have datarefs that we think
-		// are subscribed, but have not received any data. If nothing has been received
-		// in more than 5 seconds, we should resend the subscribe message.
+        // Check for unsubscribed RREFs. These are where we have datarefs that we think
+        // are subscribed, but have not received any data. If nothing has been received
+        // in more than 5 seconds, we should resend the subscribe message.
 
-		if (nowTime > lastUnsubscribeCheck) {
-			for (auto dataRef : dataRefs) {
+        if (nowTime > lastUnsubscribeCheck + 5) {
+            for (auto dataRef : dataRefs) {
 
-				// cerr << "CHECK lastUpdate=" << dataRef->getLastUpdate()
-				//		<< " and nowTime-1 " << nowTime - 1 << " for en "
-				//		<< dataRef->getEn() << endl;
+                //                 cerr << "CHECK lastUpdate=" << dataRef->getLastUpdate()
+                //                        << " and nowTime-1 " << nowTime - 1 << " for en "
+                //                        << dataRef->getEn() << endl;
 
-				//if (dataRef->getLastUpdate() < nowTime - 6) {
-				if (dataRef->getLastUpdate() == 0) {
+                //if (dataRef->getLastUpdate() < nowTime - 6) {
+                if (dataRef->getLastUpdate() == 0) {
 
-					// not received in last 2 seconds. Send a subscribe request again.
-					uint32_t dref_freq = dataRef->getFreq();
-					uint32_t dref_en = dataRef->getEn();
+                    // not received in last 2 seconds. Send a subscribe request again.
+                    uint32_t dref_freq = dataRef->getFreq();
+                    uint32_t dref_en = dataRef->getEn();
 
-					char buf[413];
-					memset(buf, 0, sizeof(buf));
+                    char buf[413];
+                    memset(buf, 0, sizeof(buf));
 
-					strcpy(buf, "RREF");
-					memcpy(buf + 5, &dref_freq, 4);
-					memcpy(buf + 9, &dref_en, 4);
-					memcpy(buf + 13, dataRef->getDataRefName().c_str(),
-							dataRef->getDataRefName().length() + 1);
+                    strcpy(buf, "RREF");
+                    memcpy(buf + 5, &dref_freq, 4);
+                    memcpy(buf + 9, &dref_en, 4);
+                    memcpy(buf + 13, dataRef->getDataRefName().c_str(),
+                           dataRef->getDataRefName().length() + 1);
 
-					sendto(sock, (void *) buf, sizeof(buf), 0,
-							(struct sockaddr *) &serverAddr, slen);
+                    sendto(sock, (void *) buf, sizeof(buf), 0,
+                           (struct sockaddr *) &serverAddr, slen);
 
-					if (1 || debug) {
-						cerr << "Sent subscribe datagram RREF for freq="
-								<< dref_freq << ", en=" << dref_en << ", name:"
-								<< dataRef->getDataRefName().c_str() << " last:"
-								<< dataRef->getLastUpdate() << " now:" << nowTime << endl;
-					}
-				}
-			}
-			lastUnsubscribeCheck = nowTime;
-		}
-
-	}
-	if (debug) {
-		cerr << "Done with XPlaneUDPClient listenerThread" << endl;
-	}
-	isRunning = false;
+                    if (debug) {
+                        cerr << "Sent subscribe datagram RREF for freq="
+                             << dref_freq << ", en=" << dref_en << ", name:"
+                             << dataRef->getDataRefName().c_str() << " last:"
+                             << dataRef->getLastUpdate() << " now:" << nowTime << endl;
+                    }
+                }
+            }
+            lastUnsubscribeCheck = nowTime;
+        }
+    }
+    if (debug) {
+        cerr << "Done with XPlaneUDPClient listenerThread" << endl;
+    }
+    isRunning = false;
 }
 
 void XPlaneUDPClient::subscribeIndividualDataRef(std::string dataRef,
-		uint32_t minFreq, bool _emitable, SubscribedCharArray * _sca) {
+                                                 uint32_t minFreq, bool _emitable, SubscribedCharArray * _sca) {
 
-	// does the subscription already exist?
-	bool needToSubscribe = false;
-	SubscribedDataRef * sdr;
-	uint32_t en;
-	auto sdrI = dataRefByNameIndex.find(dataRef);
-	if (sdrI != dataRefByNameIndex.end()) {
-		ostringstream buf;
-		buf << "Dataref \"" << dataRef << "\" is already subscribed." << endl;
-	};
+    if (debug)
+        cerr << __PRETTY_FUNCTION__ << " DataRef: " << dataRef << endl;
+    // does the subscription already exist?
+    bool needToSubscribe = false;
+    SubscribedDataRef * sdr;
+    uint32_t en;
+    auto sdrI = dataRefByNameIndex.find(dataRef);
+    if (sdrI != dataRefByNameIndex.end()) {
+        ostringstream buf;
+        buf << "Dataref \"" << dataRef << "\" is already subscribed." << endl;
+    };
 
-	// we need to subscribe to it. First figure out what "en" to use by checking
-	// dataRefByEnIndex for next unused value. This can go really bad if you've
-	// subscribed to over 2^32 datarefs.
+    // we need to subscribe to it. First figure out what "en" to use by checking
+    // dataRefByEnIndex for next unused value. This can go really bad if you've
+    // subscribed to over 2^32 datarefs.
 
-	while (dataRefByEnIndex.find(lastEn) != dataRefByEnIndex.end()) {
-		lastEn++;
-	}
-	en = lastEn++;
+    while (dataRefByEnIndex.find(lastEn) != dataRefByEnIndex.end()) {
+        lastEn++;
+    }
+    en = lastEn++;
 
-	// create the subscribedDataRef record
-	sdr = new XPlaneUDPClient::SubscribedDataRef(dataRef, en, minFreq,
-			_emitable, _sca);
-	dataRefs.push_back(sdr);
+    // create the subscribedDataRef record
+    sdr = new XPlaneUDPClient::SubscribedDataRef(dataRef, en, minFreq,
+                                                 _emitable, _sca);
 
-	// update indexes
-	dataRefByEnIndex.insert(pair<uint32_t, SubscribedDataRef *>(en, sdr));
+    dataRefs.push_back(sdr);
 
-	needToSubscribe = true;
+    // update indexes
+    dataRefByEnIndex.insert(pair<uint32_t, SubscribedDataRef *>(en, sdr));
 
-	// send a UDP to subscribe to dataref. Here we assume that if we re-subscribe
-	// to a dataref, it will update with new specs (like freq).
+    needToSubscribe = true;
 
-	if (false && needToSubscribe) {
+    // send a UDP to subscribe to dataref. Here we assume that if we re-subscribe
+    // to a dataref, it will update with new specs (like freq).
 
-		uint32_t dref_freq = sdr->getFreq();
-		uint32_t dref_en = en;
+    if (false && needToSubscribe) {
 
-		char buf[413];
-		memset(buf, 0, sizeof(buf));
+        uint32_t dref_freq = sdr->getFreq();
+        uint32_t dref_en = en;
 
-		strcpy(buf, "RREF");
-		memcpy(buf + 5, &dref_freq, 4);
-		memcpy(buf + 9, &dref_en, 4);
-		memcpy(buf + 13, dataRef.c_str(), dataRef.length() + 1);
+        char buf[413];
+        memset(buf, 0, sizeof(buf));
 
-		ssize_t res = sendto(sock, (void *) buf, sizeof(buf), 0,
-				(struct sockaddr *) &serverAddr, slen);
+        strcpy(buf, "RREF");
+        memcpy(buf + 5, &dref_freq, 4);
+        memcpy(buf + 9, &dref_en, 4);
+        memcpy(buf + 13, dataRef.c_str(), dataRef.length() + 1);
 
-		if (debug) {
-			cerr << "Sent subscribe datagram RREF for freq=" << dref_freq
-					<< ", en=" << dref_en << ", name:" << dataRef
-					<< " emitable=" << _emitable << ", returned [" << res << "]"
-					<< endl;
-		}
-	}
+        ssize_t res = sendto(sock, (void *) buf, sizeof(buf), 0,
+                             (struct sockaddr *) &serverAddr, slen);
+
+        if (debug) {
+            cerr << "Sent subscribe datagram RREF for freq=" << dref_freq
+                 << ", en=" << dref_en << ", name:" << dataRef
+                 << " emitable=" << _emitable << ", returned [" << res << "]"
+                 << endl;
+        }
+    }
 
 }
 
 void XPlaneUDPClient::unsubscribeDataRef(std::string dataRefName) {
 
-	dataRefMutex.lock();
+    dataRefMutex.lock();
 
-	auto sdrI = dataRefByNameIndex.find(dataRefName);
-	if (sdrI != dataRefByNameIndex.end()) {
+    auto sdrI = dataRefByNameIndex.find(dataRefName);
+    if (sdrI != dataRefByNameIndex.end()) {
 
-		SubscribedDataRef * sdr = sdrI->second;
+        SubscribedDataRef * sdr = sdrI->second;
 
-		// Remove it from our dataref indexes.
+        // Remove it from our dataref indexes.
 
-		for (auto it = dataRefByNameIndex.cbegin();
-				it != dataRefByNameIndex.cend();) {
-			if (it->first == dataRefName) {
-				it = dataRefByNameIndex.erase(it);
-			} else {
-				++it;
-			}
-		}
+        for (auto it = dataRefByNameIndex.cbegin();
+             it != dataRefByNameIndex.cend();) {
+            if (it->first == dataRefName) {
+                it = dataRefByNameIndex.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
-		for (auto it = dataRefByEnIndex.cbegin(); it != dataRefByEnIndex.cend();
-				) {
-			if (it->second->getDataRefName() == dataRefName) {
-				it = dataRefByEnIndex.erase(it);
-			} else {
-				++it;
-			}
-		}
+        for (auto it = dataRefByEnIndex.cbegin(); it != dataRefByEnIndex.cend();
+             ) {
+            if (it->second->getDataRefName() == dataRefName) {
+                it = dataRefByEnIndex.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
-		// Remove it our list of subscribed datarefs.
+        // Remove it our list of subscribed datarefs.
 
-		dataRefs.remove(sdr);
+        dataRefs.remove(sdr);
 
-		// don't worry about unsubscribing it from X-Plane. It will automatically
-		// be unsubscribed the next time we receive it as it is not in our
-		// index.
+        // don't worry about unsubscribing it from X-Plane. It will automatically
+        // be unsubscribed the next time we receive it as it is not in our
+        // index.
 
-	};
+    };
 
-	dataRefMutex.unlock();
+    dataRefMutex.unlock();
 
 }
 
 void XPlaneUDPClient::subscribeDataRef(std::string dataRefName,
-		uint32_t minFreq) {
+                                       uint32_t minFreq) {
 
-// lock the subscribedDataRefs
-	dataRefMutex.lock();
+    // lock the subscribedDataRefs
+    dataRefMutex.lock();
 
-// check to see if the dataRefName has a double subscript.
-	regex r("^(.*)\\[(\\d+)\\]\\[(\\d+)\\]$");
-	smatch matches;
+    if (debug)
+        cerr << __PRETTY_FUNCTION__ << ": Dataref: " << dataRefName << endl;
 
-	if (regex_match(dataRefName, matches, r)) {
+    // check to see if the dataRefName has a double subscript.
+    regex r("^(.*)\\[(\\d+)\\]\\[(\\d+)\\]$");
+    smatch matches;
 
-		// it is a char array
+    if (regex_match(dataRefName, matches, r)) {
 
-		string baseDataRefName = matches[1];
-		int rangeFrom = stoi(matches[2]);
-		int rangeTo = stoi(matches[3]);
+        // it is a char array
 
-		if (debug) {
-			cerr << "Requesting charArray [" << baseDataRefName << "] from ["
-					<< rangeFrom << "] to [" << rangeTo << "]" << endl;
-		}
+        string baseDataRefName = matches[1];
+        int rangeFrom = stoi(matches[2]);
+        int rangeTo = stoi(matches[3]);
 
-		// create the subscribedCharArray record
-		SubscribedCharArray * sca = new SubscribedCharArray(dataRefName,
-				rangeFrom, rangeTo);
+        if (debug) {
+            cerr << "Requesting charArray [" << baseDataRefName << "] from ["
+                 << rangeFrom << "] to [" << rangeTo << "]" << endl;
+        }
 
-		// subscribed to each of the individual elements
-		for (int idx = rangeFrom; idx <= rangeTo; idx++) {
+        // create the subscribedCharArray record
+        SubscribedCharArray * sca = new SubscribedCharArray(dataRefName,
+                                                            rangeFrom, rangeTo);
 
-			ostringstream drfn;
-			drfn << baseDataRefName << "[" << idx << "]";
+        // subscribed to each of the individual elements
+        for (int idx = rangeFrom; idx <= rangeTo; idx++) {
 
-			// link each subscription to the sca, and only emit on the last one.
-			subscribeIndividualDataRef(drfn.str(), minFreq, idx == rangeTo,
-					sca);
+            ostringstream drfn;
+            drfn << baseDataRefName << "[" << idx << "]";
 
-		}
+            // link each subscription to the sca, and only emit on the last one.
+            subscribeIndividualDataRef(drfn.str(), minFreq, idx == rangeTo,
+                                       sca);
 
-	} else {
+        }
 
-		// just a regular dataref
-		subscribeIndividualDataRef(dataRefName, minFreq);
-	}
+    } else {
 
-// release mutex
-	dataRefMutex.unlock();
+        // just a regular dataref
+        subscribeIndividualDataRef(dataRefName, minFreq);
+    }
+
+    // release mutex
+    dataRefMutex.unlock();
 }
 
 void XPlaneUDPClient::sendCommand(std::string cmd) {
 
-	char buf[cmd.length() + 6];
-	memset(buf, 0, sizeof(buf));
+    char buf[cmd.length() + 6];
+    memset(buf, 0, sizeof(buf));
 
-	strcpy(buf, "CMND");
-	strcpy(buf + 5, cmd.c_str());
+    strcpy(buf, "CMND");
+    strcpy(buf + 5, cmd.c_str());
 
-	sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
-			slen);
+    sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
+           slen);
 
-	if (debug) {
-		cerr << "Sent datagram CMND with payload \"" << cmd << "\"" << endl;
-	}
+    if (debug) {
+        cerr << "Sent datagram CMND with payload \"" << cmd << "\"" << endl;
+    }
 
 }
 
 void XPlaneUDPClient::setDataRef(std::string dataRef, float value) {
 
-	char buf[5 + 4 + 500];
-	strcpy(buf, "DREF");
-	memcpy(buf + 5, &value, 4);
-	memset(buf + 9, ' ', sizeof(buf) - 9);
-	strcpy(buf + 9, dataRef.c_str());
+    char buf[5 + 4 + 500];
+    strcpy(buf, "DREF");
+    memcpy(buf + 5, &value, 4);
+    memset(buf + 9, ' ', sizeof(buf) - 9);
+    strcpy(buf + 9, dataRef.c_str());
 
-	sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
-			slen);
+    sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
+           slen);
 
-	if (debug) {
-		cerr << "Sent datagram DREF with value " << value << " dref \""
-				<< dataRef << "\"" << endl;
-	}
+    if (debug) {
+        cerr << "Sent datagram DREF with value " << value << " dref \""
+             << dataRef << "\"" << endl;
+    }
+
+}
+
+//int p					The index of the airplane you want to control. use 0 for the main airplane that you fly to drive the visuals.
+//double dat_lat			latitude, in degrees
+//double dat_lon			longitude, in degrees
+//double dat_ele			elevation above sea level, in meters
+//float veh_psi_true		heading, degrees true
+//float veh_the			pitch, degrees
+//float veh_phi			roll, degrees
+void XPlaneUDPClient::sendVEHX(int p, double dat_lat, double dat_lon, double dat_ele, float veh_psi_true, float veh_the, float veh_phi) {
+
+    char buf[45];
+    memset(buf,0, sizeof(buf));
+    strcpy(buf, "VEHX");
+    memcpy(buf + 5,     &p, 4);
+    memcpy(buf + 9,     &dat_lat, 8);
+    memcpy(buf + 17,    &dat_lon, 8);
+    memcpy(buf + 25,    &dat_ele, 8);
+    memcpy(buf + 33,    &veh_psi_true, 4);
+    memcpy(buf + 37,    &veh_the, 4);
+    memcpy(buf + 41,    &veh_phi, 4);
+
+
+    sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
+           slen);
+
+    //    if (debug) {
+    //        cerr << "Sent datagram VEHX with value " << dat_lat << " " << dat_lon << " " << dat_ele << " "
+    //             << veh_psi_true << " " << veh_the << " " << veh_phi << " to " << p << endl;
+    //        fflush(stderr);
+    //    }
 
 }
 
 void XPlaneUDPClient::setDataRefString(std::string dataRef, std::string value) {
 
-	// extract array index out of dataRef if there is one.
-	regex r("^(.*)\\[(\\d+)\\]\\[(\\d+)\\]$");
-	smatch matches;
+    // extract array index out of dataRef if there is one.
+    regex r("^(.*)\\[(\\d+)\\]\\[(\\d+)\\]$");
+    smatch matches;
 
-	if (regex_match(dataRef, matches, r)) {
+    if (regex_match(dataRef, matches, r)) {
 
-		string baseDataRef = matches[1];
-		int startIdx = stoi(matches[2]);
-		int stopIdx = stoi(matches[3]);
+        string baseDataRef = matches[1];
+        int startIdx = stoi(matches[2]);
+        int stopIdx = stoi(matches[3]);
 
-		for (int i = startIdx; i < stopIdx; i++) {
+        for (int i = startIdx; i < stopIdx; i++) {
 
-			unsigned int idx = i - startIdx;
-			float data;
+            unsigned int idx = i - startIdx;
+            float data;
 
-			if (idx < value.length()) {
-				data = value.at(idx);
-			} else {
-				data = ' ';
-			}
+            if (idx < value.length()) {
+                data = value.at(idx);
+            } else {
+                data = ' ';
+            }
 
-			ostringstream dref;
-			dref << baseDataRef << "[" << i << "]";
+            ostringstream dref;
+            dref << baseDataRef << "[" << i << "]";
 
-			char buf[5 + 4 + 500];
-			strcpy(buf, "DREF");
-			memcpy(buf + 5, &data, 4);
-			memset(buf + 9, ' ', sizeof(buf) - 9);
-			strcpy(buf + 9, dref.str().c_str());
+            char buf[5 + 4 + 500];
+            strcpy(buf, "DREF");
+            memcpy(buf + 5, &data, 4);
+            memset(buf + 9, ' ', sizeof(buf) - 9);
+            strcpy(buf + 9, dref.str().c_str());
 
-			sendto(sock, (void *) buf, sizeof(buf), 0,
-					(struct sockaddr *) &serverAddr, slen);
+            sendto(sock, (void *) buf, sizeof(buf), 0,
+                   (struct sockaddr *) &serverAddr, slen);
 
-			if (debug) {
-				cerr << "Sent datagram DREF with value \"" << data
-						<< "\" dref \"" << dref.str() << "\"" << endl;
-			}
+            //            if (debug) {
+            //                cerr << "Sent datagram DREF with value \"" << data
+            //                     << "\" dref \"" << dref.str() << "\"" << endl;
+            //            }
+        }
+    } else {
+        for (int i = 0; i < value.length(); i++) {
+            float data;
+            data = value.at(i);
 
-		}
+            ostringstream dref;
+            dref << dataRef << "[" << i << "]";
 
-	} else {
-		ostringstream buf;
-		buf
-				<< "In XPlaneUDPClient::setDataRefString (dataRef, value), dataRef is \""
-				<< dataRef << "\", expecting \"^.*\\[(\\d+)\\]$\"";
-		throw runtime_error(buf.str());
-	}
+            char buf[5 + 4 + 500];
+            strcpy(buf, "DREF");
+            memcpy(buf + 5, &data, 4);
+            memset(buf + 9, ' ', sizeof(buf) - 9);
+            strcpy(buf + 9, dref.str().c_str());
+
+            sendto(sock, (void *) buf, sizeof(buf), 0,
+                   (struct sockaddr *) &serverAddr, slen);
+
+        }
+
+        if (debug) {
+            cerr << "Sent datagram DREF with value \"" << value
+                 << "\" dref \"" << dataRef << "\"" << endl;
+        }
+        //        ostringstream buf;
+        //        buf
+        //                << "In XPlaneUDPClient::setDataRefString (dataRef, value), dataRef is \""
+        //                << dataRef << "\", expecting \"^.*\\[(\\d+)\\]$\"";
+        //        cerr << buf.str();
+        //        fflush(stderr);
+        //        throw runtime_error(buf.str());
+    }
+}
+
+// Load Aircraft
+// acf_file: acf file to load including relative path from x-plane root folder
+void  XPlaneUDPClient::sendACFN(int p, std::string acf_file, int livery_index)
+{
+    const int32_t net_strDIM=150;       // must be short enough to send over the net, long enough to hold a full ACF path from the x-system folder
+    struct acfn_struct
+    {
+        int32_t m_acfn_p;
+        char m_acfn_path_rel[net_strDIM];
+        char pad[2];
+        int32_t m_acfn_live_ind;
+    };
+
+    acfn_struct acfn;
+    char buf[165];
+
+    memset(&acfn,0,sizeof(acfn));
+    acfn.m_acfn_p = p;
+    acfn.m_acfn_live_ind = livery_index;
+    strncpy(acfn.m_acfn_path_rel,acf_file.c_str(),net_strDIM-1);
+
+
+    memset(buf,0, sizeof(buf));
+    strcpy(buf, "ACFN");
+    memcpy(buf + 5, &acfn, sizeof(acfn));
+
+    sendto(sock, (void *) buf, sizeof(buf), 0, (struct sockaddr *) &serverAddr,
+           slen);
+
+    if (debug) {
+        cerr << "Load ACF file: \"" << acfn.m_acfn_path_rel << "\" with livery " << acfn.m_acfn_live_ind << " to A/C index " << p << endl;
+    }
+
 }
